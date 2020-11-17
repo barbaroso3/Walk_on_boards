@@ -189,6 +189,26 @@ Vector3 Simulate_vector3_isotropic ()
 	return Vector3(sin(fi)*sin(acos(cosT)), cos(fi)*sin(acos(cosT)), cosT);
 }
 
+Point move_point_to_border (DomainPrism prism, Point near_border_point)
+{
+	Point border_point = near_border_point;
+	
+	double eps = pow(10, -15);
+	
+	if (border_point.get_x() >= -eps && border_point.get_x() <= eps) border_point.set_x(0);
+	else if (border_point.get_x() >= prism.h - eps && border_point.get_x() <= prism.h + eps) border_point.set_x(prism.h);
+	
+	if (border_point.get_y() >= -eps && border_point.get_y() <= eps) border_point.set_y(0);
+	else if (border_point.get_y() >= prism.h - eps && border_point.get_y() <= prism.h + eps) border_point.set_y(prism.h);
+	
+	if (border_point.get_z() >= -eps && border_point.get_z() <= eps) border_point.set_z(0);
+	else if (border_point.get_z() >= prism.l - eps && border_point.get_z() <= prism.l + eps) border_point.set_z(prism.l);
+	
+	
+	
+	return border_point;
+}
+
 Point Simulate_first_border_point(Point const &start_point, DomainPrism const &prism)
 {
 	Vector3 ray_direc(Simulate_vector3_isotropic());
@@ -201,15 +221,19 @@ Point Simulate_first_border_point(Point const &start_point, DomainPrism const &p
 	}
 	Point t_dist(ray_direc.get_x()*t, ray_direc.get_y()*t, ray_direc.get_z()*t);
 	
-	return start_point + t_dist;
+	Point border_point = move_point_to_border(prism,  start_point + t_dist);
+	
+	return border_point;
 	
 }
 
 bool belong_to_prsim(Point const &point, DomainPrism const &prism)
 {
-	if (point.get_x() >= 0 && point.get_x() <= prism.h)
-		if (point.get_y() >= 0 && point.get_y() <= prism.h)
-			if (point.get_z() >= 0 && point.get_z() <= prism.l)
+	double eps = pow(10, -15);
+	
+	if (point.get_x() >= -eps && point.get_x() <= prism.h + eps)
+		if (point.get_y() >= -eps && point.get_y() <= prism.h + eps)
+			if (point.get_z() >= -eps && point.get_z() <= prism.l + eps)
 				return true;
 	
 	return false;
@@ -219,14 +243,26 @@ Point Simulate_next_border_point(Point const &start_point, DomainPrism const &pr
 {
 	Vector3 ray_direc(Simulate_vector3_isotropic());
 	
+	Point next_border_point;
+	
 	for(auto const & plane:prism.plane)
 	{
 		double t = Scholar (Vector3(plane.p0 - start_point), plane.normal) / Scholar(ray_direc, plane.normal);
 		Point t_dist(ray_direc.get_x()*t, ray_direc.get_y()*t, ray_direc.get_z()*t);
-		if(belong_to_prsim(start_point + t_dist, prism) && t != 0) return start_point + t_dist;
+		
+		Point possible_point = start_point + t_dist;
+		if(belong_to_prsim(possible_point, prism) && t != 0)
+			next_border_point = possible_point;
 	}
 	
-	return start_point;
+	next_border_point = move_point_to_border(prism, next_border_point);
+	
+	return next_border_point;
+}
+
+double Test_function(Point p)
+{
+	return pow(p.get_x(), 2) + pow(p.get_y(), 2) - 2 * pow(p.get_z(), 2) + 5;
 }
 
 WOB_answer WOB_algorithm(WOB_parameters parameters, DomainPrism prism)
@@ -237,31 +273,41 @@ WOB_answer WOB_algorithm(WOB_parameters parameters, DomainPrism prism)
 	
 	for(int it_N = 0; it_N < parameters.get_N(); ++it_N)
 	{
-		if (it_N % static_cast<int>(parameters.get_N() / 100.) == 0)
+		if (it_N % static_cast<int>(parameters.get_N() / 100.0) == 0)
 			std::cout << (double)it_N/parameters.get_N() * 100 << "%" << std::endl;
 		
-		double sum(0);
+		double sum = 0;
 		Point current_point(Simulate_first_border_point(source_point, prism));
 		
-		if(current_point.get_z() >= prism.l - pow(10, -15))
+		if(current_point.get_z() == prism.l)
+		{
 			sum += 2;
+//			sum += 2 * Test_function(current_point);
+		}
 
 		for(int it_walks = 1; it_walks <= parameters.get_num_walks(); ++it_walks)
 		{
 			current_point = Simulate_next_border_point(current_point, prism);
-			if(current_point.get_z() >= prism.l - pow(10, -15))
+
+			
+//			double weight = 2 * pow(-1, it_walks) * Test_function(current_point);
+//			if(it_walks == parameters.get_num_walks())
+//				weight *= 0.5;
+//
+//			sum += weight;
+			
+			if(current_point.get_z() == prism.l)
 			{
 				double weight = 2 * pow(-1, it_walks);
 				if(it_walks == parameters.get_num_walks())
 					weight *= 0.5;
-				
+
 				sum += weight;
 			}
 		}
 		
 		answer.expect1 += sum;
 		answer.expect2 += pow(sum, 2);
-		sum = 0;
 	}
 	
 	answer.expect1 /= parameters.get_N();
@@ -277,27 +323,39 @@ int main() {
 	srand(static_cast<unsigned int>(time(nullptr)));
 	
 	double h = 1;
-	double L = 1;
+	double L = 3;
 	DomainPrism prism (h, L);
 	
 	WOB_parameters parameters;
 	parameters.set_N(pow(10, 8));
 	parameters.set_x0(Point(h/2, h/2, h/2));
-	parameters.set_num_walks(50);
+	parameters.set_num_walks(10);
 	
-	while(1)
+	std::ofstream answ_File;
+	answ_File.open("WOB_l3_N8.txt", std::ios_base::app);
+	answ_File << "num_walks answ stat_eror time" << std::endl;
+	
+	for(int i = 4; i <= 8; ++i)
 	{
+		parameters.set_num_walks(i * 4);
+		
 		clock_t start = clock();
 		WOB_answer answer = WOB_algorithm(parameters, prism);
 		double time = (double)(clock() - start)/(CLOCKS_PER_SEC);
 		
 		std::cout <<
+		parameters.get_num_walks() << " " <<
 		answer.expect1 << " " <<
 		answer.stat_error << " " <<
 		time << " " <<
 		std::endl;
 		
-		std::cin.get();
+		answ_File <<
+		parameters.get_num_walks() << " " <<
+		answer.expect1 << " " <<
+		answer.stat_error << " " <<
+		time << " " <<
+		std::endl;
 	}
 	
 	return 0;
